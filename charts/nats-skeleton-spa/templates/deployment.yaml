@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nats-skeleton-spa.fullname" . }}
+  labels:
+    {{- include "nats-skeleton-spa.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nats-skeleton-spa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.vault.enabled }}
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-configmap: {{ include "nats-skeleton-spa.fullname" . }}-vault-agent
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nats-skeleton-spa.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "nats-skeleton-spa.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-cert-generator
+          image: alpine:3.16
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache openssl && \
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+              -keyout /etc/nginx/ssl/localhost.key \
+              -out /etc/nginx/ssl/localhost.crt \
+              -subj "/CN=localhost"
+          volumeMounts:
+            - name: nginx-ssl
+              mountPath: /etc/nginx/ssl 
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: VITE_NATS_ENDPOINT
+              value: "{{ include "nats-skeleton-spa.natsWebsocketProtocol" . }}://{{ .Values.config.nats.uri }}"
+            - name: VITE_AUTHORITY
+              value: {{ .Values.config.authIdp.uri  | quote }}
+            - name: VITE_CLIENT_ID
+              value: {{ .Values.config.authIdp.clientId  | quote }}
+            - name: VITE_REDIRECT_URI
+              value: {{ .Values.config.authIdp.redirectUri  | quote }}
+            - name: VITE_RESPONSE_TYPE
+              value: code
+            - name: VITE_SCOPE
+              value: {{ .Values.config.authIdp.scope  | quote }}
+            - name: VITE_POST_LOGOUT_REDIRECT_URI
+              value: {{ .Values.config.authIdp.postLogoutRedirectUri  | quote }}
+            - name: NGINX_ERROR_LOG_LEVEL
+              value: {{ .Values.config.nginx.errorLogLevel  | quote }}
+            - name: NGINX_LISTEN_PORT
+              value: "9000"
+            - name: NGINX_LISTEN_FLAGS
+              value: {{ include "nats-skeleton-spa.nginxSslFlags" . | quote }}
+            - name: NGINX_WEBSOCKET_BACKEND_URI
+              value: "{{ include "nats-skeleton-spa.natsHttpProtocol" . }}://{{ .Values.config.nats.uri }}"
+          {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.devDebug }}
+          command:
+            - sleep
+          args:
+          - infinity
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-ssl
+              mountPath: /etc/nginx/ssl
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9000
+              scheme: {{ include "nats-skeleton-spa.nginxHealthzScheme" . }}
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9000
+              scheme: {{ include "nats-skeleton-spa.nginxHealthzScheme" . }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 2
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: nginx-ssl
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

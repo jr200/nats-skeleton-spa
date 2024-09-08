@@ -1,0 +1,11 @@
+.env
+.env.local
+.history/
+.github/
+.venv/
+.vscode/
+*.bak
+charts/
+dist/
+node_modules/
+private/
