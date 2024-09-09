@@ -51,7 +51,9 @@ vault:
   nobodyAccount: nats/creds/operator/my-op/account/my-acct/user/nobody
 
 ## Optionally specify extra environment variables to add to container
-extraEnv: {}
+extraEnv: []
+# - name: VITE_NATS_NOBODY_CREDS_B64
+#   value: base-64-encoded-creds
 
 podAnnotations: {}
 podLabels: {}
